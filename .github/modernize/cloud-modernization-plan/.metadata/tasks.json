@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Tasks template for modernization plan. Generate this file alongside plan.md to track individual migration tasks.",
+  "tasks": [
+    {
+      "type": "setupBaseline",
+      "id": "000-setupBaseline",
+      "description": "Capture the current behavior of the Photo Album application before any migration work begins, producing a frozen baseline test specification and infra-decision-table for later verification.",
+      "reason": "A frozen pre-migration baseline is required so the integration test task can verify that behavior is preserved after the Oracle-to-PostgreSQL migration and Azure deployment.",
+      "requirements": "Snapshot the 'src/main' project folder, capture representative test cases (upload, gallery view, photo detail, delete) and test data, and record the real/mock strategy for each external dependency (database, storage) used by later integration tests.",
+      "dependencies": [],
+      "successCriteria": {
+        "passBuild": "true",
+        "passUnitTests": "true"
+      }
+    },
+    {
+      "type": "infrastructure",
+      "id": "001-infrastructure-bicep-generation",
+      "description": "Provision the Azure infrastructure required to run the Photo Album application in the cloud.",
+      "reason": "The application currently has no Azure infrastructure; compute, database, registry, identity, and diagnostics resources must be provisioned before deployment.",
+      "requirements": "Generate Bicep IaC files provisioning: a Container Apps environment and container app, Azure Container Registry, Azure Database for PostgreSQL Flexible Server, a user-assigned managed identity for passwordless authentication to PostgreSQL and the registry, and a Log Analytics workspace for diagnostics. Provision the resources after generating the IaC files.",
+      "dependencies": [],
+      "iacType": "bicep",
+      "provision": true,
+      "skills": [
+        { "name": "infrastructure-bicep-generation", "location": "builtin" }
+      ]
+    },
+    {
+      "type": "transform",
+      "id": "002-transform-migration-oracle-to-postgresql",
+      "description": "Migrate the application's database from Oracle Database to Azure Database for PostgreSQL and remove the hardcoded database password in favor of managed identity authentication.",
+      "reason": "Resolves the cloud readiness issues of depending on a self-hosted, proprietary Oracle database and authenticating to it with a static password.",
+      "requirements": "Migrate all JDBC driver usage, SQL syntax/dialect, and schema/data access from Oracle to Azure Database for PostgreSQL, preserving existing photo upload, gallery, detail, and delete functionality. Replace the existing username/password datasource authentication with Microsoft Entra ID / managed identity authentication to PostgreSQL, removing the plaintext database password from configuration entirely. This is the only task that should handle the database login credential.",
+      "dependencies": [],
+      "skills": [
+        { "name": "migration-oracle-to-postgresql", "location": "builtin" },
+        { "name": "migration-mi-postgresql", "location": "builtin" }
+      ],
+      "successCriteria": {
+        "passBuild": "true",
+        "passUnitTests": "true"
+      }
+    },
+    {
+      "type": "integrationTest",
+      "id": "003-integrationTest",
+      "description": "Build integration tests for migrated Azure services and run post-migration verification",
+      "reason": "Confirms the PostgreSQL migration and managed identity authentication work correctly against the provisioned Azure infrastructure and preserves the behavior captured in the baseline.",
+      "requirements": "Use the provisioned Azure Database for PostgreSQL Flexible Server infrastructure to validate photo upload, gallery listing, detail retrieval, and delete flows against the baseline test cases captured in task 000.",
+      "dependencies": ["000-setupBaseline", "001-infrastructure-bicep-generation", "002-transform-migration-oracle-to-postgresql"]
+    },
+    {
+      "type": "security",
+      "id": "004-security-cve-remediation",
+      "description": "Scan all project dependencies for known CVEs and remediate any identified vulnerabilities to ensure the application is secure before deployment.",
+      "reason": "Ensures the modernized application is free of known security vulnerabilities before it is deployed to Azure.",
+      "requirements": "Upgrade vulnerable dependencies to the minimum patched version. If a CVE fix requires a major version upgrade, document the affected dependency, the current version, the upgraded major version, and the breaking change risk. Verify that the project builds and all tests pass after remediation.",
+      "environmentConfiguration": "Java 25 runtime and Maven build tool established by the existing project configuration.",
+      "dependencies": ["002-transform-migration-oracle-to-postgresql"],
+      "successCriteria": {
+        "passBuild": "true",
+        "passUnitTests": "true"
+      }
+    },
+    {
+      "type": "deployment",
+      "id": "005-deployment-azure-container-apps",
+      "description": "Containerize and deploy the Photo Album application to Azure Container Apps.",
+      "reason": "Delivers the modernized application to Azure, using the infrastructure provisioned in task 001, so it runs as a managed, scalable cloud service.",
+      "requirements": "Build/update the Dockerfile for the current Java 25 runtime, build and push the container image to the provisioned Azure Container Registry, and deploy it to the provisioned Azure Container Apps environment using managed identity for authentication to PostgreSQL and the registry.",
+      "dependencies": ["003-integrationTest", "004-security-cve-remediation"],
+      "targetAzureService": "azurecontainerapp",
+      "resourceStatus": "Uses infrastructure provisioned by task 001-infrastructure-bicep-generation",
+      "deploymentTool": "bicep",
+      "skills": [
+        { "name": "azcli-containerapp-deploy", "location": "builtin" }
+      ]
+    }
+  ],
+  "metadata": {
+    "planName": "cloud-modernization-plan",
+    "projectName": "Photo Album",
+    "language": "java",
+    "createdAt": "2026-09-22T09:26:12Z",
+    "version": "1.0"
+  }
+}
